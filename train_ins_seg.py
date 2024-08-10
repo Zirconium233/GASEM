@@ -58,7 +58,9 @@ def get_args():
     parser.add_argument('--cpu_icp', dest='gpu_icp', action='store_false') # We default to use CPU ICP, because the GPU implementation is not stable and take more time than CPU
     parser.add_argument('--gpv_model_path', type=str, default="checkpoints/gpvnet.pth")
     parser.add_argument('--flownet_model_path', type=str, default="checkpoints/flownet.pth")
-    parser.add_argument('--fixed_camera', action='store_true')
+    parser.add_argument('--improve_pose', action='store_true')
+    parser.add_argument('--two_backbones', action='store_true')
+    parser.add_argument('--offset_cat', action='store_true')
     parser.set_defaults(train_with_flow=True, 
                         few_shot=False, 
                         cat_points_and_flows=False, 
@@ -67,7 +69,9 @@ def get_args():
                         gpu_icp=False, 
                         cat_features=False,
                         rot_gt=False,
-                        fixed_camera=False)
+                        improve_pose=False,
+                        two_backbones=False,
+                        offset_cat=False,)
     return parser.parse_args()
     
 def set_random_seed(seed):
@@ -91,8 +95,7 @@ def train_ins_seg(ins_seg,
                   icp_original_points=False, 
                   gpu_icp=False,
                   cat_features=False,
-                  rot_gt=False,
-                  fix_camera=False):
+                  rot_gt=False,):
     
     # optimizer = torch.optim.Adam(ins_seg.parameters(), lr=lr) # the model contains optimizer
     ins_seg.train()
@@ -190,6 +193,10 @@ def train_ins_seg(ins_seg,
                 writer.add_scalar('train/loss', loss.item(), global_step)
                 writer.add_scalar('train/all_accu', all_accu.item(), global_step)
                 writer.add_scalar('train/pixel_accu', pixel_accu, global_step)
+                try:
+                    writer.add_scalar('train/npcs_loss', return_dict['loss_prop_npcs'].item(), global_step)
+                except:
+                    pass
                 print(f"Epoch:[{epoch + 1}|{num_epochs}],Batch:[{(batch_idx + 1)}|{len(dataloader_train)}],Loss:[{loss.item():.4f}]")
             # torch.cuda.empty_cache()
 
@@ -219,8 +226,7 @@ def test_ins_seg(ins_seg,
                  icp_original_points=False, 
                  gpu_icp=False,
                  cat_features=False,
-                 rot_gt=False,
-                 fix_camera=False):
+                 rot_gt=False,):
     
     if rot_gt:
         assert no_rot == False, "if we do not have ground truth rotation, we can not use ground truth rotation to calculate the input"
@@ -240,6 +246,7 @@ def test_ins_seg(ins_seg,
     all_proposals = []
     mAPs = []
     AP50s = []
+    npcs_loss = []
     with torch.no_grad():
         total_loss = 0
         total_all_accu = 0
@@ -270,7 +277,6 @@ def test_ins_seg(ins_seg,
                         input2 = torch.stack([(pred_rot_matrices2[i].transpose(0,1) @ pc_pairs[i].pc2.points[:,0:3].transpose(0,1)).transpose(0,1).contiguous() for i in range(bs)], dim=0)
                         feat2 = torch.stack([pc_pair.pc2.points[:,3:6] for pc_pair in pc_pairs], dim=0)
                     else:
-                        # use gt to calculate the input, just for debug
                         # in test method, we still forward the gpv_net to calculate the mean rotation error
                         input1 = torch.stack([(gt_rot_matrices1[i].cuda().transpose(0,1) @ pc_pairs[i].pc1.points[:,0:3].transpose(0,1)).transpose(0,1).contiguous() for i in range(bs)], dim=0)
                         feat1 = torch.stack([pc_pair.pc1.points[:,3:6] for pc_pair in pc_pairs], dim=0)
@@ -307,6 +313,10 @@ def test_ins_seg(ins_seg,
             total_loss += loss.item()
             total_all_accu += all_accu.item()
             total_pixel_accu += pixel_accu
+            try:
+                npcs_loss.append(return_dict['loss_prop_npcs'].item())
+            except:
+                print("npcs_loss is not calculated")
             batch_idx += 1
             all_sem_preds.append(return_dict['sem_preds'].detach().cpu())
             all_sem_labels.append(return_dict['sem_labels'].detach().cpu())
@@ -354,6 +364,7 @@ def test_ins_seg(ins_seg,
     print(f"{phase} - Epoch [{epoch+1}]: Mean mIoU: {miou * 100:.4f}")
     print(f"{phase} - Epoch [{epoch+1}]: Mean All Accu: {mean_all_accu * 100:.4f}")
     print(f"{phase} - Epoch [{epoch+1}]: Mean Pixel Accu: {mean_pixel_accu * 100:.4f}")
+    print(f"{phase} - Epoch [{epoch+1}]: Mean NPCS Loss: {np.mean(npcs_loss):.4f}")
     # record results
     if writer is not None:
         if train_with_flow and not no_rot:
@@ -388,9 +399,13 @@ def test_ins_seg(ins_seg,
             mean_pixel_accu * 100,
             epoch
         )
+        writer.add_scalar(
+            f"{phase}/npcs_loss",
+            np.mean(npcs_loss),
+            epoch
+        )
         for class_idx in range(1, 10):
             partname = PART_ID2NAME[class_idx]
-            # use AP50s, AP50s[i] is ap50, but map is not required
             writer.add_scalar(
                 f"{phase}/AP@50_{partname}",
                 np.nanmean([np.nanmean(ap50[class_idx - 1]) * 100 if ap50 is not None else 0 for ap50 in AP50s]) if not np.isnan(np.nanmean([np.nanmean(ap50[class_idx - 1]) * 100 if ap50 is not None else 0 for ap50 in AP50s])) else 0,

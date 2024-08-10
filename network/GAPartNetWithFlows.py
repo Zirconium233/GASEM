@@ -206,7 +206,6 @@ def segmented_voxelize(
 ):
     torch.random.manual_seed(233)
 
-    # we find that the notion of segment gives us a generalized version of batch size.
     segment_offsets_begin = segment_offsets[:-1]
     segment_offsets_end = segment_offsets[1:]
 
@@ -333,8 +332,8 @@ def cluster_proposals(
     device = pt_xyz.device
     index_dtype = batch_indices.dtype
 
-    # here form a knn ball-query cluster.
-    # here we have a clustered indices per point, and its associated number of points.
+    # knn ball-query cluster.
+    # clustered indices per point, and its associated number of points.
     clustered_indices, num_points_per_query = ball_query(
         pt_xyz,
         pt_xyz,
@@ -350,19 +349,18 @@ def cluster_proposals(
     ccl_indices_begin = torch.arange(
         pt_xyz.shape[0], dtype=index_dtype, device=device
     ) * max_num_points_per_query
-    # here we compute the actual end of ccl-indices.
+    # compute the actual end of ccl-indices.
     ccl_indices_end = ccl_indices_begin + num_points_per_query
-    # we stack them together for later use.
+    # stack them together for later use.
     ccl_indices = torch.stack([ccl_indices_begin, ccl_indices_end], dim=1)
-    # here we have a ccl. here we have something like -
+    # have a ccl. here we have something like -
     # tensor([ 0,  1,  2,  3,  4,  3,  0,  7,  0,  9,  0,  0, 12,  0,  3,  0, 16, 17 ]).
     cc_labels = connected_components_labeling(
         ccl_indices.view(-1), clustered_indices.view(-1), compacted=False
     )
 
-    # here we sort the cc-labels. thus we have something like.
+    # sort the cc-labels. thus we have something like.
     # tensor([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 ])
-    # since here requires a permutation, we have a sorted-indices as a by-product.
     sorted_cc_labels, sorted_indices = torch.sort(cc_labels)
     return sorted_cc_labels, sorted_indices
 
@@ -570,20 +568,19 @@ def compute_npcs_loss(
 
     # gt_npcs: n, 3 -> n, 1, 1, 3
     # symmetry_matrix: n, m, 3, 3
-    # okay, we find that symmetry matrix is multiplied from right, good.
+    # symmetry matrix is multiplied from right. 
     gt_npcs = gt_npcs[:, None, None, :] @ symmetry_matrix
     # n, m, 1, 3 -> n, m, 3
     gt_npcs = gt_npcs.squeeze(2)
 
     # npcs_preds: n, 3 -> n, 1, 3
-    # we realize that gt-npcs has been added with 0.5 in each axis.
-    # but this does not affect rotation.
-    # however, it affects the implementation of dualpose.
+    # gt-npcs has been added with 0.5 in each axis.
+    # this does not affect rotation.
     dist2 = (npcs_preds[:, None, :] - gt_npcs - 0.5) ** 2
     # n, m, 3 -> n, m
     dist2 = dist2.sum(dim=-1)
 
-    # here it has a huber loss.
+    # a huber loss.
     loss = torch.where(
         dist2 <= 0.01,
         5 * dist2, torch.sqrt(dist2) - 0.05,
@@ -597,18 +594,38 @@ def compute_npcs_loss(
 
 class GaPartNetWithFlows(nn.Module):
     """
-    here we rebuild gapartnet and change the inputs
+    Rebuild gapartnet and change the inputs
     and outputs to be compatible with our flow data.
     """
 
     def __init__(self, args):
         super().__init__()
-        # We keep hyper-parameter same as GAPartNet
+        # Keep most hyper-parameter same as GAPartNet
         self.args = args
         self.cat_points_and_flows = args.cat_points_and_flows
         self.in_channels = 6 if not args.cat_points_and_flows else 9
         self.cat_features = args.cat_features
+        self.improve_pose = args.improve_pose
+        try:
+            # test for independent backbones for two point clouds
+            self.two_backbones = args.two_backbones
+        except:
+            self.two_backbones = False
+        try:
+            # When we fix the camera, we do not need to use flownet during this process
+            self.fix_camera = args.fix_camera
+        except:
+            self.fix_camera = False
+
+        try:
+            self.offset_cat = args.offset_cat
+        except:
+            self.offset_cat = False
+        if self.fix_camera:
+            self.cat_features = True
+        
         if self.cat_features:
+            # directly concatenate features of two point clouds (not recommended)
             assert self.cat_points_and_flows == False, "cat_features is not compatible with cat_points_and_flows"
         self.num_part_classes = 10
         self.use_sem_focal_loss = True
@@ -627,7 +644,7 @@ class GaPartNetWithFlows(nn.Module):
         self.score_fullscale = 28
         self.score_scale = 50
 
-        self.val_score_threshold = 0.09
+        self.val_score_threshold = 0.09 # When test pose, we matually edit these value
         self.val_min_num_points_per_proposal = 3
         self.val_nms_iou_threshold = 0.3
         self.val_ap_iou_threshold = 0.5
@@ -637,15 +654,27 @@ class GaPartNetWithFlows(nn.Module):
         channels = (16, 32, 48, 64, 80, 96, 112)
         block_repeat = 2
         self.backbone = SparseUNet.build(in_channels, channels, block_repeat, norm_fn)
+        if self.two_backbones:
+            self.backbone2 = SparseUNet.build(in_channels, channels, block_repeat, norm_fn)
         self.feature_dim = channels[0]
         self.offset_head = nn.Sequential(
-            nn.Linear(self.feature_dim, self.feature_dim),
+            nn.Linear(self.feature_dim * 2 if self.offset_cat else self.feature_dim, self.feature_dim),
             norm_fn(self.feature_dim),
             nn.ReLU(inplace=True),
             nn.Linear(self.feature_dim, 3),
         )
-        if self.cat_features:
-            # add a layer to extract features from two point clouds, such as flownet
+        if self.fix_camera:
+            self.sem_seg_unet = SparseUNet.build(
+                self.feature_dim, channels[:4], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
+            )
+            self.sem_seg_head = nn.Sequential( # the features is concatenated features, so we need more layers
+                nn.Linear(self.feature_dim, self.feature_dim),
+                norm_fn(self.feature_dim),
+                nn.ReLU(inplace=True),
+                nn.Linear(self.feature_dim, self.num_part_classes),
+            )
+        elif self.cat_features and not self.fix_camera and not self.improve_pose:
+            # add a layer to extract features from two point clouds, here we use flownet
             self.flownet = FlowNet3D(in_channel=16, out_channel=16)
             self.sem_seg_unet = SparseUNet.build(
                 self.feature_dim * 2, channels[:4], block_repeat, norm_fn, without_stem=self.feature_dim * 2 == channels[0]
@@ -658,12 +687,44 @@ class GaPartNetWithFlows(nn.Module):
             )
             # self.feature_dim *= 2
             # self.sem_seg_head = nn.Linear(self.feature_dim, self.num_part_classes)
+        elif self.cat_features and self.improve_pose:
+            self.flownet = FlowNet3D(in_channel=16, out_channel=16)
+            self.sem_seg_unet = SparseUNet.build(
+                self.feature_dim * 2, channels[1:6], block_repeat, norm_fn, without_stem=self.feature_dim * 2 == channels[1]
+            )
+            self.sem_seg_head = nn.Sequential(
+                nn.Linear(channels[1], channels[0]),
+                norm_fn(channels[0]),
+                nn.ReLU(inplace=True),
+                nn.Linear(channels[0], self.num_part_classes),
+            )
         else:
             self.sem_seg_head = nn.Linear(self.feature_dim, self.num_part_classes)
-        self.score_unet = SparseUNet.build(
-            self.feature_dim, channels[:2], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
-        )
-        self.score_head = nn.Linear(channels[0], self.num_part_classes - 1)
+        if self.improve_pose and self.fix_camera:
+            self.score_unet = SparseUNet.build(
+                self.feature_dim, channels[0:3], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
+            )
+            self.score_head = nn.Sequential(
+                nn.Linear(channels[0], channels[0]),
+                norm_fn(channels[0]),
+                nn.ReLU(inplace=True),
+                nn.Linear(channels[0], self.num_part_classes - 1),
+            )
+        elif self.improve_pose:
+            self.score_unet = SparseUNet.build(
+                self.feature_dim * 2, channels[1:4], block_repeat, norm_fn, without_stem=self.feature_dim * 2 == channels[1]
+            )
+            self.score_head = nn.Sequential(
+                nn.Linear(channels[1], channels[0]),
+                norm_fn(channels[0]),
+                nn.ReLU(inplace=True),
+                nn.Linear(channels[0], self.num_part_classes - 1),
+            )
+        else:
+            self.score_unet = SparseUNet.build(
+                self.feature_dim, channels[:2], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
+            )
+            self.score_head = nn.Linear(channels[0], self.num_part_classes - 1)
 
         symmetry_matrix_1, symmetry_matrix_2, symmetry_matrix_3 = get_symmetry_matrix()
         self.symmetry_matrix_1 = symmetry_matrix_1
@@ -671,23 +732,42 @@ class GaPartNetWithFlows(nn.Module):
         self.symmetry_matrix_3 = symmetry_matrix_3
         symmetry_indices = [0, 1, 3, 3, 2, 0, 3, 2, 4, 1]
         self.symmetry_indices = torch.as_tensor(symmetry_indices, dtype=torch.int64).cuda()
-
-        self.npcs_unet = SparseUNet.build(
-            self.feature_dim, channels[:2], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
-        )
-        self.npcs_head = nn.Linear(channels[0], 3 * (self.num_part_classes - 1))
+        if self.improve_pose and self.fix_camera:
+            self.npcs_unet = SparseUNet.build(
+                self.feature_dim, channels[0:3], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
+            )
+            self.npcs_head = nn.Sequential(
+                nn.Linear(channels[0], channels[0]),
+                norm_fn(channels[0]),
+                nn.ReLU(inplace=True),
+                nn.Linear(channels[0], 3 * (self.num_part_classes - 1)),
+            )
+        elif self.improve_pose:
+            self.npcs_unet = SparseUNet.build(
+                self.feature_dim * 2, channels[1:4], block_repeat, norm_fn, without_stem=self.feature_dim * 2 == channels[1]
+            )
+            self.npcs_head = nn.Sequential(
+                nn.Linear(channels[1], channels[0]),
+                norm_fn(channels[0]),
+                nn.ReLU(inplace=True),
+                nn.Linear(channels[0], 3 * (self.num_part_classes - 1)),
+            )
+        else:
+            self.npcs_unet = SparseUNet.build(
+                self.feature_dim, channels[:2], block_repeat, norm_fn, without_stem=self.feature_dim == channels[0]
+            )
+            self.npcs_head = nn.Linear(channels[0], 3 * (self.num_part_classes - 1))
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=args.lr)
         self.device = torch.device('cuda:0')
 
     def forward(self, pc_pairs, flow_data, do_inference):
-        # this operation is insane.
-        # we get this much, nonetheless.
-        # modified it
-        pc1s = [pc_pair.pc1 for pc_pair in pc_pairs] # Point cloud 1 is the primary point cloud, and point cloud 2 is secondary
-        # We just use 1 for inference
+        pc1s = [pc_pair.pc1 for pc_pair in pc_pairs] # Point cloud 1 is the primary point cloud
+        # if we run gapartnet's method, we just use pc1 for inference
         pc1s = [pc1.to(self.device) for pc1 in pc1s]
-        if self.cat_features:
+        if self.fix_camera:
+            pass
+        elif self.cat_features:
             # We use the backbone directly to extract features of two point clouds, not flownet. 
             assert flow_data is None, "We use the backbone directly to extract features of two point clouds, not flownet. "
             pc2s = [pc_pair.pc2 for pc_pair in pc_pairs]
@@ -725,14 +805,18 @@ class GaPartNetWithFlows(nn.Module):
 
         # data_batch_copy = copy.deepcopy(data_batch)
         pc_feature = self.forward_backbone(data_batch)
-        offsets_preds = self.forward_offset(pc_feature)
-        offsets_gt = instance_regions[:, :3] - pt_xyz
-        if self.cat_features:
+        if not self.offset_cat:
+            offsets_preds = self.forward_offset(pc_feature)
+            offsets_gt = instance_regions[:, :3] - pt_xyz
+        if self.fix_camera:
+            # not run flownet for test
+            pc_feature_cat = pc_feature
+        elif self.cat_features and not self.fix_camera:
             data_batch_2 = PointCloud.collate(pc2s)
-            pc_feature_2 = self.forward_backbone(data_batch_2)
+            pc_feature_2 = self.forward_backbone(data_batch_2, bone_two=self.two_backbones)
             pt_xyz_2 = data_batch_2.points[:, :3]
             # use flownet like structure to extract features of two point clouds
-            # the original input is [bs*n,3](points) and [bs*n,16](features), but we need [bs,3,n] and [bs,16,n]
+            # the original input is [bs*n,3](points) and [bs*n,16](features), we change it to [bs,3,n] and [bs,16,n]
             bs = data_batch.batch_size
             pc_feature_flow = self.flownet(pt_xyz.reshape(bs, -1, 3).transpose(1, 2).contiguous(), 
                                               pt_xyz_2.reshape(bs, -1, 3).transpose(1,2).contiguous(), 
@@ -741,8 +825,13 @@ class GaPartNetWithFlows(nn.Module):
             pc_feature_cat = torch.cat((pc_feature, pc_feature_flow), dim=1)
             
             # pc_feature = pc_feature_flow
+        else:
+            pc_feature_cat = pc_feature # just a placeholder
         if self.cat_features:
-            sem_logits = self.forward_sem_seg(pc_feature_cat, pt_xyz=pt_xyz, batch_size=data_batch.batch_size)
+            sem_logits, sem_seg_features = self.forward_sem_seg(pc_feature_cat, pt_xyz=pt_xyz, batch_size=data_batch.batch_size)
+            if self.offset_cat:
+                offsets_preds = self.forward_offset(sem_seg_features) # if we cat features, we use sem_seg_features to predict offsets
+                offsets_gt = instance_regions[:, :3] - pt_xyz
         else:
             sem_logits = self.forward_sem_seg(pc_feature)
         loss_sem_seg = self.loss_sem_seg(sem_logits, sem_labels)
@@ -752,8 +841,10 @@ class GaPartNetWithFlows(nn.Module):
         )
             
         voxel_tensor, pc_voxel_id, proposals = self.proposal_clustering_and_revoxelize(
-            pt_xyz=pt_xyz, batch_indices=batch_indices, pt_features=pc_feature, sem_preds=sem_preds,
-            offset_preds=offsets_preds, instance_labels=instance_labels)
+            pt_xyz=pt_xyz, batch_indices=batch_indices, pt_features=pc_feature_cat if self.improve_pose else pc_feature,
+            sem_preds=sem_preds,
+            offset_preds=offsets_preds, 
+            instance_labels=instance_labels)
 
         if proposals is not None:
             proposals.sem_labels = sem_labels[proposals.valid_mask][proposals.sorted_indices]
@@ -886,10 +977,13 @@ class GaPartNetWithFlows(nn.Module):
 
         return diff_thetas
 
-    def forward_backbone(self, data_batch):
+    def forward_backbone(self, data_batch, bone_two=False):
         voxel_tensor = data_batch.voxel_tensor
         pc_voxel_id = data_batch.pc_voxel_id
-        voxel_features = self.backbone(voxel_tensor)
+        if self.two_backbones and bone_two:
+            voxel_features = self.backbone2(voxel_tensor)
+        else:
+            voxel_features = self.backbone(voxel_tensor)
         pc_feature = voxel_features.features[pc_voxel_id]
         return pc_feature
 
@@ -947,11 +1041,13 @@ class GaPartNetWithFlows(nn.Module):
 
             # Forward pass through SparseUNet
             sem_seg_features = self.sem_seg_unet(sparse_input)
-
+            sem_seg_features = sem_seg_features.features[pc_voxel_id]
             # Forward pass through sem_seg_head
-            sem_logits = self.sem_seg_head(sem_seg_features.features[pc_voxel_id])
-
-        return sem_logits
+            sem_logits = self.sem_seg_head(sem_seg_features)
+        try:
+            return sem_logits, sem_seg_features
+        except:
+            return sem_logits
 
     def loss_sem_seg(
             self,
@@ -1018,7 +1114,6 @@ class GaPartNetWithFlows(nn.Module):
             offset_preds: torch.Tensor,
             instance_labels: Optional[torch.Tensor],
     ):
-        # here is a lot of code.
         device = torch.device('cuda:0')
 
         if self.training:
@@ -1026,7 +1121,7 @@ class GaPartNetWithFlows(nn.Module):
         else:
             valid_mask = (sem_preds > 0)
 
-        # we only do clustering for valid instances.
+        # do clustering for valid instances.
         pt_xyz = pt_xyz[valid_mask]
         batch_indices = batch_indices[valid_mask]
         pt_features = pt_features[valid_mask]
@@ -1043,7 +1138,6 @@ class GaPartNetWithFlows(nn.Module):
         )
         batch_offsets[1:] = num_points_per_batch.cumsum(0)
 
-        # we have to understand this piece of code.
         # sorted_cc_labels mean that this is sorted cc labels placed consecutively.
         # sorted_indices means the indices of the points placed.
         sorted_cc_labels, sorted_indices = cluster_proposals(
@@ -1054,7 +1148,7 @@ class GaPartNetWithFlows(nn.Module):
             pt_xyz + offset_preds, batch_indices_compact, batch_offsets, sem_preds,
             self.ball_query_radius, self.max_num_points_per_query_shift,
         )
-        # here we create two-times more consecutive proposals.
+        # create two-times more consecutive proposals.
         sorted_cc_labels = torch.cat([
             sorted_cc_labels,
             sorted_cc_labels_shift + sorted_cc_labels.shape[0],
@@ -1074,11 +1168,8 @@ class GaPartNetWithFlows(nn.Module):
         valid_proposal_mask = (num_points_per_proposal >= self.min_num_points_per_proposal)
         # valid_proposal_mask is the valid mask for proposals.
         # proposal_indices is the map from proposal to point.
-        # thus we can get the valid point mask.
         valid_point_mask = valid_proposal_mask[proposal_indices]
 
-        # these indices can overlap.
-        # i mean one point can be in multiple proposals.
         sorted_indices = sorted_indices[valid_point_mask]
         if sorted_indices.shape[0] == 0:
             return None, None, None
@@ -1116,7 +1207,7 @@ class GaPartNetWithFlows(nn.Module):
             batch_size=num_proposals,
         )
 
-        # # here we create shape-model and pts association.
+        # # create shape-model and pts association.
         # proposal_offsets_begin = proposal_offsets[:-1]  # type: ignore
         # proposal_offsets_end = proposal_offsets[1:]  # type: ignore
         # proposal_shape_models = []
@@ -1130,8 +1221,7 @@ class GaPartNetWithFlows(nn.Module):
         #     shape_model = shape_model_dict[batch_index.item()][inst_label.item()]
         #     proposal_shape_models.append(shape_model)
         # proposal_shape_models = torch.stack(proposal_shape_models, dim=0).float().cuda()
-
-        # note that here, proposal_offsets and proposal_indices are basically the same as batch_indices.
+        # proposal_offsets and proposal_indices are basically the same as batch_indices.
         # but these representations are all within the notion of the sparse operation.
         proposals = Instances(
             valid_mask=valid_mask,

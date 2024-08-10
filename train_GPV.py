@@ -131,6 +131,8 @@ def main():
     # load the model if needed
     if args.model_path is not None:
         model.load_state_dict(torch.load(args.model_path))
+    if args.few_shot:
+        args.log_dir += "_few_shot"
     dataset_train, dataset_test_intra, dataset_test_inter = get_datasets(args.root_dir, args.test_intra_dir, args.test_inter_dir, voxelization=False, shot=args.few_shot, choose_category=None, max_points=args.max_points, augmentation=False)
     dataloader_train, dataloader_test_intra, dataloader_test_inter = get_dataloaders(dataset_train, dataset_test_intra, dataset_test_inter, num_workers=0, batch_size=args.batch_size)
     # train(model, dataloader_train, dataloader_test_inter, dataloader_test_intra, 0.0001, 300, "./log_dir/GPV_test_new_loss_cat_Camera")

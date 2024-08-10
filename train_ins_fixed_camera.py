@@ -51,12 +51,15 @@ def get_args():
     parser.add_argument('--use_icp', action='store_true')
     parser.add_argument('--random_seed', type=int, default=233)
     parser.add_argument('--cat_features', action='store_true')
+    parser.add_argument('--fix_camera', action='store_true')
+    parser.add_argument('--gap_and_flow', action='store_false', dest='fix_camera')
     parser.add_argument('--flownet_model_path', type=str, default="checkpoints/flownet.pth")
     parser.set_defaults(train_with_flow=True, 
                         few_shot=False, 
                         cat_points_and_flows=False, 
                         use_icp=True, 
                         cat_features=False,
+                        fix_camera=True,
                         )
     return parser.parse_args()
     
@@ -136,6 +139,10 @@ def train_ins_seg(ins_seg,
                             indices = icp_mask(input1, input2, directly_nn=True) # the pose is same, not need icp, just nearest neighbor
                             batch_indices = torch.arange(indices.size(0)).unsqueeze(-1).expand_as(indices)
                             flow_data = (input2[batch_indices,indices] - input1).permute(0,2,1) # points1 + flow = points2(shuffled)
+                            for i in range(bs):
+                                # just transform the points
+                                pc_pairs[i].pc1.points[:,0:3] = input1[i]
+                                pc_pairs[i].pc2.points[:,0:3] = input2[i]
             else:
                 flow_data = None
             return_dict = ins_seg(pc_pairs, flow_data, do_inference=False)
@@ -235,6 +242,10 @@ def test_ins_seg(ins_seg,
                             indices = icp_mask(input1, input2, directly_nn=True) # the pose is same, not need icp, just nearest neighbor
                             batch_indices = torch.arange(indices.size(0)).unsqueeze(-1).expand_as(indices)
                             flow_data = (input2[batch_indices,indices] - input1).permute(0,2,1) # points1 + flow = points2(shuffled)
+                            for i in range(bs):
+                                # just transform the points
+                                pc_pairs[i].pc1.points[:,0:3] = input1[i]
+                                pc_pairs[i].pc2.points[:,0:3] = input2[i]
             else:
                 flow_data = None
             return_dict = ins_seg(pc_pairs, flow_data, do_inference=True)

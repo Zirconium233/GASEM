@@ -13,7 +13,6 @@ from datasets.GAPartNet.misc.visu_util import OBJfile2points, map2image, save_po
     OTHER_COLOR, HEIGHT, WIDTH, EDGE, K, font, fontScale, fontColor,thickness, lineType 
 import matplotlib.pyplot as plt
 from network.icp import icp, icp_gpu, icp_mask
-# only gpvpose is available
 
 
 def random_show(model: nn.Module, datasets: List[Dataset], dir_name: List[str], log_name: Dict, i: int = None):
@@ -249,7 +248,7 @@ def visu_flows(flow_field: torch.Tensor):
         ax.quiver(x, y, z, x, y, z, length=0.1)
         plt.show()
         if i != 0:
-            break # 只显示第一个Batch的结果
+            break
 
 def visu_flows_with_start_points(flow_field: torch.Tensor, start_points: torch.Tensor):
     """
@@ -273,80 +272,7 @@ def visu_flows_with_start_points(flow_field: torch.Tensor, start_points: torch.T
         ax.quiver(x_start, y_start, z_start, x, y, z, length=0.1)
         plt.show()
         if i != 0:
-            break # 只显示第一个Batch的结果
-
-def random_show_flow(gpv_net: nn.Module, flownet: nn.Module, dataset: Dataset, dir_name: Dict, use_gt=False, use_icp=False, idx=None, icp_device="gpu"):
-    if gpv_net is not None:
-        gpv_net.cuda()
-    else:
-        print("gpv_net is None, no rotation prediction")
-    if flownet is not None:
-        flownet.cuda()
-    else:
-        assert use_icp, "flownet is None, no flow prediction"
-    if idx is None:
-        i = random.randint(0, len(dataset))
-    else:
-        i = idx
-    pc_pairs = [dataset[i].to("cuda:0")]
-    with torch.no_grad():
-        if gpv_net is not None:
-            (p_green_R1, p_red_R1, f_green_R1, f_red_R1), (p_green_R2, p_red_R2, f_green_R2, f_red_R2) = gpv_net(pc_pairs)
-            rot_1_pred = vectors_to_rotation_matrix(p_green_R1, p_red_R1, True)
-            rot_2_pred = vectors_to_rotation_matrix(p_green_R2, p_red_R2, True)
-            error1 = calculate_pose_metrics(rot_1_pred, torch.stack([pc_pairs[0].rot_1.transpose(0,1)]))
-            print("error1: ", error1)
-            error2 = calculate_pose_metrics(rot_2_pred, torch.stack([pc_pairs[0].rot_2.transpose(0,1)]))
-            print("error2: ", error2)
-            input1 = (rot_1_pred[0].transpose(0,1) @ pc_pairs[0].pc1.points[0:2048,0:3].transpose(0,1)).transpose(0,1)
-            feat1 = pc_pairs[0].pc1.points[0:2048,3:6]
-            input2 = (rot_2_pred[0].transpose(0,1) @ pc_pairs[0].pc2.points[0:2048,0:3].transpose(0,1)).transpose(0,1)
-            feat2 = pc_pairs[0].pc2.points[0:2048,3:6]
-        else:
-            # directly not use rotation
-            if not use_gt:
-                rot_1_pred = torch.eye(3).unsqueeze(0).to("cuda:0")
-                rot_2_pred = torch.eye(3).unsqueeze(0).to("cuda:0")
-                input1 = pc_pairs[0].pc1.points[0:2048,0:3]
-                feat1 = pc_pairs[0].pc1.points[0:2048,3:6]
-                input2 = pc_pairs[0].pc2.points[0:2048,0:3]
-                feat2 = pc_pairs[0].pc2.points[0:2048,3:6]
-            else:
-                # use gt rotation
-                rot_1_pred = pc_pairs[0].rot_1.unsqueeze(0).to("cuda:0")
-                rot_2_pred = pc_pairs[0].rot_2.unsqueeze(0).to("cuda:0")
-                input1 = (rot_1_pred[0].transpose(0,1) @ pc_pairs[0].pc1.points[0:2048,0:3].transpose(0,1)).transpose(0,1)
-                feat1 = pc_pairs[0].pc1.points[0:2048,3:6]
-                input2 = (rot_2_pred[0].transpose(0,1) @ pc_pairs[0].pc2.points[0:2048,0:3].transpose(0,1)).transpose(0,1)
-                feat2 = pc_pairs[0].pc2.points[0:2048,3:6]
-        if not use_icp:
-            output = flownet(
-                input1.unsqueeze(0).transpose(1,2).contiguous(),
-                input2.unsqueeze(0).transpose(1,2).contiguous(),
-                feat1.unsqueeze(0).transpose(1,2).contiguous(),
-                feat2.unsqueeze(0).transpose(1,2).contiguous()
-            )
-        else:
-            if icp_device == "gpu":
-                output = icp_gpu(torch.cat([input1, feat1], dim=1).unsqueeze(0), torch.cat([input2, feat2], dim=1).unsqueeze(0))
-            else:
-                output = icp(torch.cat([input1, feat1], dim=1).unsqueeze(0), torch.cat([input2, feat2], dim=1).unsqueeze(0))
-    if not use_icp:
-        visu_flows(output)
-    else:
-        visu_flows(output.permute(0,2,1))
-    if not use_gt:
-        show_merged_pair_with_pred_rotation(dir_name[dataset], 
-                                            rot_1_pred[0].transpose(0,1).detach().cpu().numpy(), 
-                                            rot_2_pred[0].transpose(0,1).detach().cpu().numpy(), 
-                                            dataset.group_files[i][0].split('/')[-1].split('.')[0], 
-                                            dataset.group_files[i][1].split('/')[-1].split('.')[0], use_origin_color=False)
-    else:
-        show_merged_pair_with_pred_rotation(dir_name[dataset], 
-                                            pc_pairs[0].rot_1.cpu().numpy(), 
-                                            pc_pairs[0].rot_2.cpu().numpy(), 
-                                            dataset.group_files[i][0].split('/')[-1].split('.')[0], 
-                                            dataset.group_files[i][1].split('/')[-1].split('.')[0], use_origin_color=False)
+            break
 
 def view_pc1_to_pc2(
     GAPARTNET_DATA_ROOT,
@@ -389,96 +315,44 @@ def view_pc1_to_pc2(
     pc_img_world = cv2.cvtColor(pc_img_world, cv2.COLOR_BGR2RGB)
     plt.imshow(pc_img_world)
 
-def random_show_flow_pc1_to_pc2(gpv_net: nn.Module, flownet: nn.Module, dataset: Dataset, dir_name: Dict, use_gt=False, use_icp=False, idx=None, icp_device="gpu"):
-    gpv_net.cuda()
-    if idx is None:
-        i = random.randint(0, len(dataset))
-    else:
-        i = idx
-    pc_pairs = [dataset[i].to("cuda:0")]
-    with torch.no_grad():
-        (p_green_R1, p_red_R1, f_green_R1, f_red_R1), (p_green_R2, p_red_R2, f_green_R2, f_red_R2) = gpv_net(pc_pairs)
-        rot_1_pred = vectors_to_rotation_matrix(p_green_R1, p_red_R1, True)
-        rot_2_pred = vectors_to_rotation_matrix(p_green_R2, p_red_R2, True)
-        error1 = calculate_pose_metrics(rot_1_pred, torch.stack([pc_pairs[0].rot_1.transpose(0,1)]))
-        print("error1: ", error1)
-        error2 = calculate_pose_metrics(rot_2_pred, torch.stack([pc_pairs[0].rot_2.transpose(0,1)]))
-        print("error2: ", error2)
-        input1 = (rot_1_pred[0].transpose(0,1) @ pc_pairs[0].pc1.points[:,0:3].transpose(0,1)).transpose(0,1)
-        feat1 = pc_pairs[0].pc1.points[:,3:6]
-        input2 = (rot_2_pred[0].transpose(0,1) @ pc_pairs[0].pc2.points[:,0:3].transpose(0,1)).transpose(0,1)
-        feat2 = pc_pairs[0].pc2.points[:,3:6]
-        if not use_icp:
-            output = flownet(
-                input1.unsqueeze(0).transpose(1,2).contiguous(),
-                input2.unsqueeze(0).transpose(1,2).contiguous(),
-                feat1.unsqueeze(0).transpose(1,2).contiguous(),
-                feat2.unsqueeze(0).transpose(1,2).contiguous()
-            )
-        else:
-            if icp_device == "gpu":
-                output = icp_gpu(torch.cat([input1, feat1], dim=1).unsqueeze(0), torch.cat([input2, feat2], dim=1).unsqueeze(0))
-            else:
-                output = icp(torch.cat([input1, feat1], dim=1).unsqueeze(0), torch.cat([input2, feat2], dim=1).unsqueeze(0))
-    if use_icp:
-        output = output.permute(0,2,1).cpu()
-    visu_flows(output[:,0:3,0:2048].cpu())
-    if not use_gt:
-        view_pc1_to_pc2(dir_name[dataset], 
-                        rot_1_pred[0].transpose(0,1).detach().cpu().numpy(), 
-                        rot_2_pred[0].transpose(0,1).detach().cpu().numpy(), 
-                        dataset.group_files[i][0].split('/')[-1].split('.')[0], 
-                        dataset.group_files[i][1].split('/')[-1].split('.')[0],
-                        flow_data=output[0,0:3,:].permute(1,0).cpu().numpy(), 
-                        use_origin_color=False)
-    else:
-        view_pc1_to_pc2(dir_name[dataset], 
-                        pc_pairs[0].rot_1.cpu().numpy(), 
-                        pc_pairs[0].rot_2.cpu().numpy(), 
-                        dataset.group_files[i][0].split('/')[-1].split('.')[0], 
-                        dataset.group_files[i][1].split('/')[-1].split('.')[0],
-                        flow_data=output[0,0:3,:].permute(1,0).cpu().numpy(), 
-                        use_origin_color=False)
 
+def save_part_point_cloud(xyz, colors, save_path):
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter(xyz[:, 0], xyz[:, 1], xyz[:, 2], c=colors, alpha=0.5)
+    ax.set_axis_off()
+    plt.savefig(save_path)
+    plt.close(fig)
 
-def random_show_fixed_camera(points_input1, points_input2, flownet=None, use_origin_color=False, add_flow=False, directly_nn=False, trans: np.ndarray = None):
-    points_input1 = points_input1.numpy()
-    points_input2 = points_input2.numpy()
-    xyz_input1 = points_input1[:,:3]
-    rgb1 = points_input1[:,3:6]
-    xyz_input2 = points_input2[:,:3]
-    rgb2 = points_input2[:,3:6]
-    if trans is not None:
-        # convert points to ball space
-        xyz_input1 = (xyz_input1 - trans[1:]) / trans[0]
-        xyz_input2 = (xyz_input2 - trans[1:]) / trans[0]
+def draw_vector_on_3d_plot(ax, center, vector, color, scale=1.0, arrow_length_ratio=0.1, linewidth=2):
+    start_point = center
+    end_point = center + vector * scale
+    ax.quiver(start_point[0], start_point[1], start_point[2], 
+              vector[0], vector[1], vector[2], 
+              color=color, length=scale, normalize=True, arrow_length_ratio=arrow_length_ratio, linewidth=linewidth)
 
-    if flownet is not None:
-        with torch.no_grad():
-            input1 = torch.tensor(xyz_input1).unsqueeze(0).transpose(1,2).contiguous().to("cuda:0")
-            input2 = torch.tensor(xyz_input2).unsqueeze(0).transpose(1,2).contiguous().to("cuda:0")
-            feat1 = torch.tensor(rgb1).unsqueeze(0).transpose(1,2).contiguous().to("cuda:0")
-            feat2 = torch.tensor(rgb2).unsqueeze(0).transpose(1,2).contiguous().to("cuda:0")
-            output = flownet(input1, input2, feat1, feat2)
-            visu_flows_with_start_points(output[:,:,0:2048], input1[:,:,0:2048])
-    else:
-        # use icp cpu instead
-        indices = icp_mask(torch.cat([torch.tensor(xyz_input1), torch.tensor(rgb1)], dim=1).unsqueeze(0), torch.cat([torch.tensor(xyz_input2), torch.tensor(rgb2)], dim=1).unsqueeze(0), directly_nn)
-        output = (torch.tensor(xyz_input2).unsqueeze(0)[:,indices[0],:] - torch.tensor(xyz_input1).unsqueeze(0)).permute(0,2,1)
-        visu_flows_with_start_points(output[:,:,0:2048], torch.tensor(xyz_input1).unsqueeze(0).permute(0,2,1)[:,:,0:2048])
+def random_generate_rotation_matrix(min, max):
+    x = random.uniform(min, max)
+    y = random.uniform(min, max)
+    z = random.uniform(min, max)
 
-    if not use_origin_color:
-        # use red for image 1 and blue for image 2
-        rgb1[:,0:3] = np.array([1, 0, 0])  # red
-        rgb2[:,0:3] = np.array([0, 0, 1])  # blue
-    if add_flow:
-        xyz_input1 = xyz_input1 + output[0,0:3,:].permute(1,0).cpu().numpy()
-    if trans is not None:
-        # add it back for draw graph
-        xyz_input1 = xyz_input1 * trans[0] + trans[1:]
-        xyz_input2 = xyz_input2 * trans[0] + trans[1:]
-    xyz_world = np.concatenate((xyz_input1, xyz_input2), axis=0)
-    rgb = np.concatenate((rgb1, rgb2), axis=0)
-    pc_img_world = map2image(xyz_world, rgb*255.0)
-    pc_img_world = cv2.cvtColor(pc_img_world, cv2.COLOR_BGR2RGB)
-    plt.imshow(pc_img_world)
+    Rz = np.array([
+        [np.cos(z), -np.sin(z), 0],
+        [np.sin(z), np.cos(z), 0],
+        [0, 0, 1]
+    ])
+
+    Ry = np.array([
+        [np.cos(y), 0, np.sin(y)],
+        [0, 1, 0],
+        [-np.sin(y), 0, np.cos(y)]
+    ])
+
+    Rx = np.array([
+        [1, 0, 0],
+        [0, np.cos(x), -np.sin(x)],
+        [0, np.sin(x), np.cos(x)]
+    ])
+
+    R = Rz @ Ry @ Rx
+    return R.astype(np.float32)

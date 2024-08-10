@@ -11,7 +11,7 @@ idx: (N,2), int32, (y,x) in the image coordinate
 '''
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+# os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 from os.path import join as pjoin
 from argparse import ArgumentParser
 import numpy as np
@@ -190,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument('--save_path', type=str, default='./sampled_data', help='Specify the path to save the sampled data')
     parser.add_argument('--num_points', type=int, default=20000, help='Specify the number of points to sample')
     parser.add_argument('--visualize', type=bool, default=False, help='Whether to visualize the sampled point cloud')
+    parser.add_argument('--category', type=str, default=None, help='Specify the category')
     
     args = parser.parse_args()
     
@@ -221,6 +222,9 @@ if __name__ == "__main__":
         log_string(LOG_FILE, s)
     
     for category in filename_dict:
+        if args.category is not None and category != args.category:
+            log_writer(f'Skip: {category}')
+            continue
         log_writer(f'Start: {category}')
 
         fn_list = filename_dict[category]
