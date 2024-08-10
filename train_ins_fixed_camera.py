@@ -376,7 +376,8 @@ def main():
         flownet.eval()
     else:
         flownet = None
-
+    if not args.train_with_flow:
+        args.fix_camera = False # set it False to run gapartnet
     ins_seg = GaPartNetWithFlows(args).cuda()
     ins_seg.train() # only train ins_seg model
     # torch.autograd.set_detect_anomaly(True)

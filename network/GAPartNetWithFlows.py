@@ -605,7 +605,10 @@ class GaPartNetWithFlows(nn.Module):
         self.cat_points_and_flows = args.cat_points_and_flows
         self.in_channels = 6 if not args.cat_points_and_flows else 9
         self.cat_features = args.cat_features
-        self.improve_pose = args.improve_pose
+        try:
+            self.improve_pose = args.improve_pose
+        except:
+            self.improve_pose = False
         try:
             # test for independent backbones for two point clouds
             self.two_backbones = args.two_backbones
