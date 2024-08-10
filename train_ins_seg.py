@@ -36,9 +36,9 @@ import random
 
 def get_args():
     parser = argparse.ArgumentParser(description='Training script')
-    parser.add_argument('--root_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/train")
-    parser.add_argument('--test_intra_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_intra")
-    parser.add_argument('--test_inter_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_inter")
+    parser.add_argument('--root_dir', type=str, default="./datasets/GAPartNet/train")
+    parser.add_argument('--test_intra_dir', type=str, default="./datasets/GAPartNet/test_intra")
+    parser.add_argument('--test_inter_dir', type=str, default="./datasets/GAPartNet/test_inter")
     parser.add_argument('--num_epochs', type=int, default=100)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--log_dir', type=str, default="log_dir/ins_seg")
@@ -54,6 +54,7 @@ def get_args():
     parser.add_argument('--icp_transformed_points', dest='icp_original_points', action='store_false')
     parser.add_argument('--gpu_icp', action='store_true')
     parser.add_argument('--cat_features', action='store_true')
+    parser.add_argument('--no_cat_features', action='store_false', dest='cat_features')
     parser.add_argument('--rot_gt', action='store_true')
     parser.add_argument('--cpu_icp', dest='gpu_icp', action='store_false') # We default to use CPU ICP, because the GPU implementation is not stable and take more time than CPU
     parser.add_argument('--gpv_model_path', type=str, default="checkpoints/gpvnet.pth")
@@ -461,6 +462,8 @@ def main():
     if not args.train_with_flow:
         args.improve_pose = False
         args.cat_features = False
+    if not args.cat_features:
+        args.impove_pose = False
     ins_seg = GaPartNetWithFlows(args).cuda()
     ins_seg.train() # only train ins_seg model
     # torch.autograd.set_detect_anomaly(True)

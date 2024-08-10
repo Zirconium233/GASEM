@@ -323,10 +323,10 @@ def test_ins_seg(ins_seg,
 
 def get_args():
     parser = argparse.ArgumentParser(description='Testing script')
-    parser.add_argument('--root_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/train")
-    parser.add_argument('--test_intra_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_intra")
-    parser.add_argument('--test_inter_dir', type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_inter")
-    parser.add_argument('--model_path', type=str, default="log_dir/ins_seg/2024-07-25-Main-GAP/ins_seg_[100|300].pth")
+    parser.add_argument('--root_dir', type=str, default="./datasets/GAPartNet/train")
+    parser.add_argument('--test_intra_dir', type=str, default="./datasets/GAPartNet/test_intra")
+    parser.add_argument('--test_inter_dir', type=str, default="./datasets/GAPartNet/test_inter")
+    parser.add_argument('--model_path', type=str, default="log_dir/ins_seg/2024-07-Main-GAP/ins_seg_[300|300].pth")
     parser.add_argument('--num_epochs', type=int, default=100)
     parser.add_argument('--lr', type=float, default=1e-3) # just a placeholder
     parser.add_argument('--log_dir', type=str, default="log_dir/test")

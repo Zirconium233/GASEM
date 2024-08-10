@@ -36,9 +36,9 @@ import random
 
 def get_args():
     parser = argparse.ArgumentParser(description='Training script')
-    parser.add_argument('--root_dir', type=str, default="/16T/zhangran/GAPartNet_fix_small/train")
-    parser.add_argument('--test_intra_dir', type=str, default="/16T/zhangran/GAPartNet_fix_small/test_intra")
-    parser.add_argument('--test_inter_dir', type=str, default="/16T/zhangran/GAPartNet_fix_small/test_inter")
+    parser.add_argument('--root_dir', type=str, default="./datasets/GAPartNet/train")
+    parser.add_argument('--test_intra_dir', type=str, default="./datasets/GAPartNet/test_intra")
+    parser.add_argument('--test_inter_dir', type=str, default="./datasets/GAPartNet/test_inter")
     parser.add_argument('--num_epochs', type=int, default=100)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--log_dir', type=str, default="log_dir/ins_seg_fixed")

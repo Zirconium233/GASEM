@@ -142,9 +142,9 @@ def main():
 
 def get_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root_dir", type=str, default="/16T/zhangran/GAPartNet_re_rendered/train")
-    parser.add_argument("--test_intra_dir", type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_intra")
-    parser.add_argument("--test_inter_dir", type=str, default="/16T/zhangran/GAPartNet_re_rendered/test_inter")
+    parser.add_argument("--root_dir", type=str, default="./datasets/GAPartNet/train")
+    parser.add_argument("--test_intra_dir", type=str, default="./datasets/GAPartNet/test_intra")
+    parser.add_argument("--test_inter_dir", type=str, default="./datasets/GAPartNet/test_inter")
     parser.add_argument("--lr", type=float, default=0.0001)
     parser.add_argument("--num_epochs", type=int, default=100)
     parser.add_argument("--log_dir", type=str, default="./log_dir/GPVNet")
