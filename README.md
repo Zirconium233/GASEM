@@ -1,5 +1,11 @@
-# Code for GASEM
+## Code for GASEM
 
+Official implementation of ICME 2025 [GASEM: Boosting Generalized and Actionable Parts Segmentation and Pose Estimation via Object Motion Perception]().
+
+<!-- Workshop paper notification: April 25, 2025 -->
+
+pipeline:
+![image](example/pipeline.png)
 ## Install environment
 
 ### 1. Install dependencies
@@ -40,17 +46,17 @@
   Copy flownet3d offical release model as [flownet.pth](https://github.com/hyangwinter/flownet3d_pytorch/blob/master/pretrained_model/model.best.t7) to checkpoints folder. 
 
 ### 2. Train or use our release GPVNet model for alignment 
-  ```
+  ```bash
   python train_GPV.py \
     --root_dir=/path/to/train \
     --test_intra_dir=/path/to/test_intra \
     --test_inter_dir=/path/to/test_inter
   ```
 
-### 3. Train our model
+### 3. Train
   
   For normal gapartnet dataset, run `train_ins_seg.py`. 
-  ```
+  ```bash
   # Our method
   python train_ins_seg.py \
     --root_dir=/path/to/train \
@@ -102,7 +108,14 @@
     --test_inter_dir=/path/to/test_inter \
     --no_cat_features --use_icp
 
-  # You can see code for more. 
+  # You can find more comparisons in the argparser section of the code. 
   ```
 
-## 
+### 4. Appendix
+An example:
+![image](example/visu/visu_759.png)
+
+<!-- If you find our work useful, please cite it as:  -->
+<!-- ``` -->
+
+<!-- ``` -->

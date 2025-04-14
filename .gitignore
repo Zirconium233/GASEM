@@ -1,6 +1,6 @@
-log_dir/*
-checkpoints/*
-example/*
+# log_dir/*
+# checkpoints/*
+# example/*
 __pycache__
 .vscode
 *.pyc
